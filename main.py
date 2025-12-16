@@ -13,6 +13,7 @@ from db import engine, SessionLocal
 from models import EmailSummary
 from db import Base
 from models import User
+from auth import router as auth_router
 
 
 # -----------------------
@@ -169,6 +170,14 @@ def shutdown_event():
 
 
 # ROUTES (DB-backed)
+app = FastAPI()
+app.include_router(auth_router)
+
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
 
 @app.get("/fetch_emails")
 def fetch_emails(db: Session = Depends(get_db)):
@@ -198,5 +207,5 @@ def fetch_emails(db: Session = Depends(get_db)):
 # Run server
 
 if __name__ == "__main__":
-    
+    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -1,10 +1,11 @@
 # auth.py
 import os
+from urllib import request
 from fastapi import APIRouter, Depends
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
-
+from fastapi import Request, HTTPException, Depends
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
@@ -16,6 +17,7 @@ load_dotenv()
 router = APIRouter()
 
 SCOPES = [
+    "openid",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
     "https://www.googleapis.com/auth/gmail.modify",
@@ -67,39 +69,51 @@ def google_login():
 
 
 @router.get("/auth/google/callback")
-def google_callback(code: str, db: Session = Depends(get_db)):
-    flow = Flow.from_client_config(
-        {
-            "web": {
-                "client_id": CLIENT_ID,
-                "client_secret": CLIENT_SECRET,
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-            }
-        },
+def google_callback(request: Request , db: Session = Depends(get_db)):
+    code = request.query_params.get("code")
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing code")
+
+    flow = Flow.from_client_secrets_file(
+        "credentials.json",
         scopes=SCOPES,
-        redirect_uri=REDIRECT_URI,
+        redirect_uri=os.getenv("GOOGLE_REDIRECT_URI"),
     )
 
     flow.fetch_token(code=code)
     creds = flow.credentials
 
-    oauth2_service = build("oauth2", "v2", credentials=creds)
-    user_info = oauth2_service.userinfo().v2().me().get().execute()
+    # Fetch user info
+    userinfo_response = request.get(
+        "https://www.googleapis.com/oauth2/v2/userinfo",
+        headers={"Authorization": f"Bearer {creds.token}"},
+    )
+    user_info = userinfo_response.json()
 
-    user = db.query(User).filter(User.google_id == user_info["id"]).first()
+    google_id = user_info.get("id")
+    email = user_info.get("email")
+
+    if not google_id or not email:
+        raise HTTPException(status_code=400, detail="Invalid Google user info")
+
+    # Find or create user
+    user = db.query(User).filter(User.google_id == google_id).first()
 
     if not user:
         user = User(
-            email=user_info["email"],
-            google_id=user_info["id"],
+            google_id=google_id,
+            email=email,
+            access_token=creds.token,
+            refresh_token=creds.refresh_token,
+            token_expiry=creds.expiry,
         )
         db.add(user)
-
-    user.access_token = creds.token
-    user.refresh_token = creds.refresh_token
-    user.token_expiry = creds.expiry
+    else:
+        user.access_token = creds.token
+        user.refresh_token = creds.refresh_token
+        user.token_expiry = creds.expiry
 
     db.commit()
 
-    return {"message": "Google login successful"}
+    return RedirectResponse(url="/docs")
+

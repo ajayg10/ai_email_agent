@@ -7,6 +7,8 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from dotenv import load_dotenv
 from langchain_community.chat_models import ChatOpenAI
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
 
 # Load environment variables
 load_dotenv()
@@ -18,6 +20,22 @@ SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
 # Initialize LangChain model (keep temperature low for deterministic output)
 llm = ChatOpenAI(model="gpt-4-turbo", temperature=0.2, openai_api_key=OPENAI_API_KEY)
 
+
+# Reconstructs OAuth credentials
+
+# Uses refresh token automatically if access token expired
+
+# Returns a user-specific Gmail client
+def get_gmail_service_for_user(user):
+    creds = Credentials(
+        token=user.access_token,
+        refresh_token=user.refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=os.getenv("GOOGLE_CLIENT_ID"),
+        client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+    )
+
+    return build("gmail", "v1", credentials=creds)
 
 def gmail_authenticate():
     """Authenticate Gmail and return service object"""
@@ -163,3 +181,4 @@ def process_new_emails(max_results=10):
         })
 
     return processed
+

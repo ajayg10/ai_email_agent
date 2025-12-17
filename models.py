@@ -5,17 +5,18 @@ from db import Base
 from sqlalchemy import ForeignKey
 from sqlalchemy.orm import relationship
 
-
 class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
+    google_id = Column(String(255), unique=True, index=True, nullable=False)
     email = Column(String(320), unique=True, index=True, nullable=False)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    access_token = Column(String, nullable=True)
+    refresh_token = Column(String, nullable=True)
+    token_expiry = Column(DateTime, nullable=True)
 
-    emails = relationship("EmailSummary", back_populates="user")
-    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class EmailSummary(Base):
     __tablename__ = "email_summaries"

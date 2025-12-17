@@ -14,7 +14,8 @@ from models import EmailSummary
 from db import Base
 from models import User
 from auth import router as auth_router
-
+from models import User
+from email_service import get_gmail_service_for_user
 
 # -----------------------
 # DATABASE CONFIG
@@ -28,9 +29,11 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
 
-# -----------------------
-# ORM MODEL (with message_id for dedupe)
-# -----------------------
+
+
+# Create DB file + tables if missing
+Base.metadata.create_all(bind=engine)
+
 class EmailSummary(Base):
     __tablename__ = "email_summaries"
 
@@ -44,8 +47,6 @@ class EmailSummary(Base):
     tag = Column(String(128), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-# Create DB file + tables if missing
-Base.metadata.create_all(bind=engine)
 
 # -----------------------
 # FASTAPI + CORS
@@ -178,6 +179,29 @@ app.include_router(auth_router)
 def health_check():
     return {"status": "ok"}
 
+
+@app.get("/me/emails")
+def fetch_my_emails(db: Session = Depends(get_db)):
+    user = db.query(User).first()  # TEMP: first logged-in user
+
+    if not user:
+        raise HTTPException(status_code=404, detail="No user found")
+
+    service = get_gmail_service_for_user(user)
+
+    results = service.users().messages().list(
+        userId="me",
+        maxResults=5
+    ).execute()
+
+    messages = results.get("messages", [])
+
+    return {
+        "user": user.email,
+        "emails_found": len(messages),
+        "messages": messages
+    }
+    
 
 @app.get("/fetch_emails")
 def fetch_emails(db: Session = Depends(get_db)):

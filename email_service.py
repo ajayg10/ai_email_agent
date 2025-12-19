@@ -8,7 +8,10 @@ from google.auth.transport.requests import Request
 from dotenv import load_dotenv
 from langchain_community.chat_models import ChatOpenAI
 from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
+
+from models import EmailSummary
+from sqlalchemy.orm import Session
+
 
 # Load environment variables
 load_dotenv()
@@ -182,3 +185,72 @@ def process_new_emails(max_results=10):
 
     return processed
 
+
+def fetch_and_summarize_for_user(
+    service,
+    db: Session,
+    user,
+    max_results: int = 5,
+):
+    """
+    Fetch unread emails for a logged-in user,
+    summarize them using LLM,
+    store results in DB,
+    return summaries.
+    """
+
+    results = service.users().messages().list(
+        userId="me",
+        q="is:unread category:primary",
+        maxResults=max_results,
+    ).execute()
+
+    messages = results.get("messages", [])
+    summaries = []
+
+    for msg in messages:
+        msg_id = msg["id"]
+
+        # 🚫 Deduplication
+        exists = db.query(EmailSummary).filter(
+            EmailSummary.message_id == msg_id,
+            EmailSummary.user_id == user.id
+        ).first()
+        if exists:
+            continue
+
+        msg_data = service.users().messages().get(
+            userId="me",
+            id=msg_id,
+            format="full"
+        ).execute()
+
+        headers = msg_data.get("payload", {}).get("headers", [])
+        subject = next((h["value"] for h in headers if h["name"] == "Subject"), "")
+        sender = next((h["value"] for h in headers if h["name"] == "From"), "")
+        snippet = msg_data.get("snippet", "")
+
+        # 🧠 LLM summary
+        summary_data = summarize_email(snippet)
+
+        email_row = EmailSummary(
+            user_id=user.id,
+            message_id=msg_id,
+            sender=sender,
+            subject=subject,
+            snippet=snippet,
+            summary=summary_data["summary"],
+            tag=summary_data["tag"],
+        )
+
+        db.add(email_row)
+
+        summaries.append({
+            "from": sender,
+            "subject": subject,
+            "summary": summary_data["summary"],
+            "tag": summary_data["tag"],
+        })
+
+    db.commit()
+    return summaries

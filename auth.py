@@ -1,18 +1,21 @@
 # auth.py
 import os
-from urllib import request
-from fastapi import APIRouter, Depends
+import requests
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
-from dotenv import load_dotenv
-from fastapi import Request, HTTPException, Depends
 from google_auth_oauthlib.flow import Flow
-from googleapiclient.discovery import build
 
 from db import SessionLocal
 from models import User
 
-load_dotenv()
+from auth_utils import create_access_token
+from fastapi.responses import JSONResponse
 
 router = APIRouter()
 
@@ -23,15 +26,8 @@ SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
 ]
 
-CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
-CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+CLIENT_SECRETS_FILE = "credentials.json"
 REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI")
-
-
-"""
-OAuth routes for Google login.
-Handles user authentication and token persistence.
-"""
 
 
 def get_db():
@@ -40,20 +36,12 @@ def get_db():
         yield db
     finally:
         db.close()
-        
-        
+
 
 @router.get("/auth/google")
 def google_login():
-    flow = Flow.from_client_config(
-        {
-            "web": {
-                "client_id": CLIENT_ID,
-                "client_secret": CLIENT_SECRET,
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-            }
-        },
+    flow = Flow.from_client_secrets_file(
+        CLIENT_SECRETS_FILE,
         scopes=SCOPES,
         redirect_uri=REDIRECT_URI,
     )
@@ -66,25 +54,23 @@ def google_login():
     return RedirectResponse(authorization_url)
 
 
-
-
 @router.get("/auth/google/callback")
-def google_callback(request: Request , db: Session = Depends(get_db)):
+def google_callback(request: Request, db: Session = Depends(get_db)):
     code = request.query_params.get("code")
     if not code:
         raise HTTPException(status_code=400, detail="Missing code")
 
     flow = Flow.from_client_secrets_file(
-        "credentials.json",
+        CLIENT_SECRETS_FILE,
         scopes=SCOPES,
-        redirect_uri=os.getenv("GOOGLE_REDIRECT_URI"),
+        redirect_uri=REDIRECT_URI,
     )
 
     flow.fetch_token(code=code)
     creds = flow.credentials
 
-    # Fetch user info
-    userinfo_response = request.get(
+    # ✅ FIX: use requests, not request.get
+    userinfo_response = requests.get(
         "https://www.googleapis.com/oauth2/v2/userinfo",
         headers={"Authorization": f"Bearer {creds.token}"},
     )
@@ -96,7 +82,6 @@ def google_callback(request: Request , db: Session = Depends(get_db)):
     if not google_id or not email:
         raise HTTPException(status_code=400, detail="Invalid Google user info")
 
-    # Find or create user
     user = db.query(User).filter(User.google_id == google_id).first()
 
     if not user:
@@ -115,5 +100,17 @@ def google_callback(request: Request , db: Session = Depends(get_db)):
 
     db.commit()
 
-    return RedirectResponse(url="/docs")
+    
+    db.refresh(user)
 
+    # 🔐 Create JWT
+    token = create_access_token({
+        "user_id": user.id,
+        "email": user.email
+    })
+
+    return JSONResponse({
+        "access_token": token,
+        "token_type": "bearer",
+        "email": user.email
+    })

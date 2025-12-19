@@ -1,38 +1,37 @@
-# models.py
-from sqlalchemy import Column, Integer, String, Text, DateTime
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey
 from sqlalchemy.sql import func
-from db import Base
-from sqlalchemy import ForeignKey
 from sqlalchemy.orm import relationship
+from db import Base
 
 class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    google_id = Column(String(255), unique=True, index=True, nullable=False)
-    email = Column(String(320), unique=True, index=True, nullable=False)
+    google_id = Column(String, unique=True, index=True, nullable=False)
+    email = Column(String, unique=True, index=True, nullable=False)
 
-    access_token = Column(String, nullable=True)
-    refresh_token = Column(String, nullable=True)
-    token_expiry = Column(DateTime, nullable=True)
+    access_token = Column(String)
+    refresh_token = Column(String)
+    token_expiry = Column(DateTime)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    emails = relationship("EmailSummary", back_populates="user")
+
 
 class EmailSummary(Base):
     __tablename__ = "email_summaries"
 
     id = Column(Integer, primary_key=True, index=True)
-    message_id = Column(String(255), unique=True, index=True, nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
 
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-
-    sender = Column(String(320), nullable=True)
-    subject = Column(String(1024), nullable=True)
-    snippet = Column(Text, nullable=True)
-
-    summary = Column(Text, nullable=True)
-    suggested_reply = Column(Text, nullable=True)
-    tag = Column(String(128), nullable=True)
+    message_id = Column(String, unique=True, index=True)
+    sender = Column(String)
+    subject = Column(String)
+    snippet = Column(Text)
+    summary = Column(Text)
+    suggested_reply = Column(Text)
+    tag = Column(String)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

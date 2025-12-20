@@ -112,5 +112,6 @@ def google_callback(request: Request, db: Session = Depends(get_db)):
     return JSONResponse({
         "access_token": token,
         "token_type": "bearer",
-        "email": user.email
+        "email": user.email,
+        "redirect_to": (f"http://localhost:5173/welcome?token={token}")
     })
